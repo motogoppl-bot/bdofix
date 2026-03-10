@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>BDOFIX - System Diagnozy Eksperckiej</title>
+    
+    <!-- TAGI PWA: Zmieniają stronę w aplikację na telefonie -->
+    <meta name="theme-color" content="#121212">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" href="ikona.png">
+    
     <style>
         :root {
             --bg-color: #121212; --surface-color: #1e1e1e;
@@ -100,7 +108,7 @@
     <div class="modal-overlay" id="settings-modal">
         <div class="modal-content">
             <h3 style="margin-top:0; color: var(--primary-color);">Konfiguracja Google AI</h3>
-            <p style="font-size: 13px; color: var(--text-muted);">Twój klucz z AI Studio jest już fabrycznie wbudowany w kod aplikacji. Jeśli w przyszłości wygenerujesz nowy klucz, możesz go podmienić tutaj.</p>
+            <p style="font-size: 13px; color: var(--text-muted);">Upewnij się, że wkleiłeś tutaj swój klucz po instalacji na nowym urządzeniu.</p>
             <label>Twój klucz API Gemini:</label>
             <input type="text" id="inp-apikey" placeholder="AIzaSy..." style="margin-bottom: 20px;">
             <button class="btn btn-primary" onclick="saveSettings()">Zapisz i Zamknij</button>
@@ -209,6 +217,12 @@
 
     <!-- LOGIKA APLIKACJI -->
     <script>
+        // --- POMOCNICZE FUNKCJE SIECIOWE (Zabezpieczenie przed błędem 404 w Render/PWA) ---
+        // Zmuszamy aplikację do korzystania z "pełnych" ścieżek URL niezależnie od przeglądarki.
+        function getApiUrl(endpoint) {
+            return window.location.origin + endpoint;
+        }
+
         // --- KONFIGURACJA AI ---
         const domyslnyKlucz = "AIzaSyB_Y0wYhTybfyIX3A60cIxmmnqzsZBmqoE";
         
@@ -267,12 +281,16 @@
             if (isPreviewMode) {
                 return new Promise(resolve => setTimeout(() => resolve({ json: () => Promise.resolve([]) }), 300));
             }
-            return fetch(url, opcje);
+            // Zabezpieczony absolutny URL
+            return fetch(getApiUrl(url), opcje);
         }
 
         function zaladujMojeAuta() {
             pokazEkran('ekran-auta');
-            bezpiecznyFetch('/moje_auta').then(res => res.json()).then(auta => {
+            bezpiecznyFetch('/moje_auta').then(res => {
+                if (!res.ok) throw new Error("Odpowiedź serwera: " + res.status);
+                return res.json();
+            }).then(auta => {
                 const pojemnik = document.getElementById('lista-aut-pojemnik');
                 pojemnik.innerHTML = ''; 
                 if(!auta || auta.length === 0) { pojemnik.innerHTML = '<p style="color:var(--text-muted); text-align:center;">Baza danych jest pusta. Wykonaj pierwszą diagnozę.</p>'; return; }
@@ -293,7 +311,7 @@
                     pojemnik.appendChild(div);
                 });
             }).catch(err => {
-                document.getElementById('lista-aut-pojemnik').innerHTML = '<p style="color:red; text-align:center;">Błąd połączenia z serwerem bazodanowym BDOFIX (app.py).</p>';
+                document.getElementById('lista-aut-pojemnik').innerHTML = '<p style="color:red; text-align:center;">Błąd połączenia z serwerem bazodanowym BDOFIX (app.py).<br><small>' + err.message + '</small></p>';
             });
         }
 
@@ -304,25 +322,25 @@
                 return { porady_fora: [{ tekst: "BŁĄD KRYTYCZNY: Brak klucza API Gemini." }], porady_ai: [] };
             }
 
-            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${klucz}`;
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${klucz}`;
             
-            // --- ZAKTUALIZOWANY PROMPT: Fora + AI + Zakaz Halucynacji ---
-            const prompt = `Jesteś BDOFIX - surowym ekspertem, diagnostą i inżynierem samochodowym z 30-letnim stażem. Masz dostęp do zgromadzonej wiedzy z internetu.
+            // --- ZAKTUALIZOWANY PROMPT: Krótko, konkretnie i bez powtarzania ---
+            const prompt = `Jesteś BDOFIX - diagnostą samochodowym pracującym w warsztacie. Twoje odpowiedzi muszą być BARDZO KRÓTKIE, żołnierskie i do rzeczy. Zero "lania wody" i poezji.
 Pojazd: ${daneAuta.marka} ${daneAuta.model} (${daneAuta.rocznik})
-Rodzaj napędu: ${daneAuta.typ_silnika}
-Kod silnika: ${daneAuta.kod_silnika}
-Zgłoszony kod usterki OBD2 / Opis: ${daneAuta.kod_bledu}
+Silnik: ${daneAuta.typ_silnika} (Kod: ${daneAuta.kod_silnika})
+Zgłoszony kod usterki / Opis: ${daneAuta.kod_bledu}
 
 INSTRUKCJA KRYTYCZNA:
-1. PRZEANALIZUJ SILNIK: Rozszyfruj fizyczną budowę tego kodu silnika (np. czy ma rozrząd na pasku czy łańcuchu? czy ma system zmiennych faz VVT?). Nie zmyślaj podzespołów, których tam nie ma! Odrzuć definicje ze słownika OBD2 jeśli nie pasują do tej konstrukcji.
-2. WIEDZA Z FORÓW (porady_fora): Przeszukaj swoją wiedzę z polskich i zagranicznych forów motoryzacyjnych (np. elektroda.pl, forum VAG/BMW itp.). Wygeneruj 2 najczęstsze rozwiązania tego problemu dokładnie dla tego kodu silnika, o których dyskutują mechanicy w sieci. Wskaż jasno, że to popularne rozwiązania z forów.
-3. PODPOWIEDZI EKSPERCKIE AI (porady_ai): Następnie podaj 2 własne, techniczne procedury diagnostyczne do sprawdzenia w warsztacie (np. pomiary, bloki wartości mierzonych VCDS/Odis, napięcia).
+1. ZERO ZMYŚLANIA: Dopasuj diagnozę do fizycznej budowy kodu silnika (pasek to pasek, łańcuch to łańcuch). Odrzuć definicje słownikowe OBD2, jeśli nie pasują do tej konstrukcji.
+2. BĄDŹ ZWIĘZŁY: Każda porada to MAKSYMALNIE 1-2 krótkie zdania. Pisz jak mechanik do mechanika w warsztacie (np. "Sprawdź wiązkę czujnika wałka przy rozruszniku, lubi gnić.").
+3. WIEDZA Z FORÓW (porady_fora): Podaj 1 lub 2 najczęstsze, konkretne przyczyny z polskich forów (np. elektroda.pl).
+4. PODPOWIEDZI AI (porady_ai): Podaj 1 lub 2 INNE przyczyny (np. co zmierzyć, bloki VCDS). MASZ ZAKAZ POWTARZANIA w tej sekcji tego, co napisałeś w sekcji forów! Podaj alternatywy.
 
 Odpowiadaj WYŁĄCZNIE w formacie JSON z dwoma kluczami: 'porady_fora' oraz 'porady_ai'.`;
 
             const payload = {
                 contents: [{ parts: [{ text: prompt }] }],
-                systemInstruction: { parts: [{ text: "Jesteś surowym inżynierem. Generujesz obiekty JSON. Nigdy nie proponujesz naprawy elementów, których silnik fizycznie nie posiada." }]},
+                systemInstruction: { parts: [{ text: "Jesteś mechanikiem. Pisz bardzo krótko (max 2 zdania na poradę). Zwracaj JSON. Nigdy nie powtarzaj tych samych porad w różnych sekcjach." }]},
                 generationConfig: {
                     responseMimeType: "application/json",
                     responseSchema: {
@@ -400,7 +418,7 @@ Odpowiadaj WYŁĄCZNIE w formacie JSON z dwoma kluczami: 'porady_fora' oraz 'por
             let wynikiBazy = { porady_baza: [] };
             if (!isPreviewMode) {
                 try {
-                    const res = await fetch('/szukaj_baza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kod_bledu: obecneAuto.kod_bledu, marka: obecneAuto.marka }) });
+                    const res = await bezpiecznyFetch('/szukaj_baza', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kod_bledu: obecneAuto.kod_bledu, marka: obecneAuto.marka }) });
                     wynikiBazy = await res.json();
                 } catch(e) { console.log("Błąd bazy lokalnej", e); }
             }
@@ -551,5 +569,4 @@ Odpowiadaj WYŁĄCZNIE w formacie JSON z dwoma kluczami: 'porady_fora' oraz 'por
         }
     </script>
 </body>
-
 </html>
